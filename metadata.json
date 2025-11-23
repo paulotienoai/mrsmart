@@ -1,0 +1,7 @@
+{
+  "name": "Mr. Smart - AI Executive Assistant",
+  "description": "A high-performance, conversational AI agent capable of managing emails, calendar events, and phone calls via voice or text interaction.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
