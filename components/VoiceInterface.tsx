@@ -26,6 +26,7 @@ const VoiceInterface: React.FC = () => {
   // Session Ref
   const aiRef = useRef<GoogleGenAI | null>(null);
   const sessionRef = useRef<any>(null);
+  const isConnectedRef = useRef(false);
 
   // Recording & Transcript Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -243,6 +244,7 @@ const VoiceInterface: React.FC = () => {
           onopen: async () => {
             setStatus('Listening...');
             setConnected(true);
+            isConnectedRef.current = true;
             lastUserInteractionRef.current = Date.now();
             
             // Play Start-up Sound
@@ -291,7 +293,7 @@ const VoiceInterface: React.FC = () => {
             processorRef.current = scriptProcessor;
             
             scriptProcessor.onaudioprocess = (e) => {
-              if (isMuted) return; 
+            if (isMuted || !isConnectedRef.current) return; 
               
               const inputData = e.inputBuffer.getChannelData(0);
               
@@ -374,12 +376,14 @@ const VoiceInterface: React.FC = () => {
             }
           },
           onclose: () => {
+            isConnectedRef.current = false;
             setStatus('Disconnected');
             setConnected(false);
             finalizeRecording();
           },
           onerror: (e) => {
             console.error(e);
+            isConnectedRef.current = false;
             setStatus('Error occurred');
             setConnected(false);
             finalizeRecording();
@@ -433,6 +437,7 @@ const VoiceInterface: React.FC = () => {
   };
 
   const disconnect = () => {
+    isConnectedRef.current = false;
     if (processorRef.current) {
         processorRef.current.disconnect();
         processorRef.current.onaudioprocess = null;
