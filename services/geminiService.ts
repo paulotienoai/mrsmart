@@ -29,7 +29,8 @@ export const sendMessageToGemini = async (
 ) => {
   
   // ALWAYS create a new instance to ensure we use the latest API key from the environment
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Updated to use GEMINI_API_KEY per production requirements
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   // Configure Model
   const modelName = useThinking ? "gemini-3-pro-preview" : "gemini-2.5-flash";
@@ -70,7 +71,8 @@ export const sendMessageToGemini = async (
 export const generateSummary = async (transcript: string): Promise<string> => {
     if (!transcript.trim()) return "No conversation detected.";
     
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    // Updated to use GEMINI_API_KEY per production requirements
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',

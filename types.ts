@@ -39,6 +39,14 @@ export interface Recording {
     transcript: string;
 }
 
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  avatar?: string;
+  googleToken?: string; // If logged in via Google
+}
+
 export enum AssistantMode {
   VOICE = 'VOICE',
   CHAT = 'CHAT'

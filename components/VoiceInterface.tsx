@@ -26,7 +26,7 @@ const VoiceInterface: React.FC = () => {
   // Session Ref
   const aiRef = useRef<GoogleGenAI | null>(null);
   const sessionRef = useRef<any>(null);
-  const isConnectedRef = useRef(false);
+  const isConnectedRef = useRef<boolean>(false); // Sync ref for audio loop
 
   // Recording & Transcript Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -41,7 +41,11 @@ const VoiceInterface: React.FC = () => {
 
   // Initialize AI
   useEffect(() => {
-    aiRef.current = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    // Updated to use GEMINI_API_KEY per production requirements
+    aiRef.current = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    return () => {
+        disconnect(); // Cleanup on unmount
+    };
   }, []);
 
   // Inactivity Monitoring Loop
@@ -51,7 +55,7 @@ const VoiceInterface: React.FC = () => {
         hasWarnedRef.current = false;
 
         inactivityIntervalRef.current = setInterval(() => {
-            if (!sessionRef.current || !audioContextRef.current) return;
+            if (!sessionRef.current || !audioContextRef.current || !isConnectedRef.current) return;
 
             // Check if Model is currently speaking (or audio is queued)
             // If model is speaking, we reset the user interaction timer so we don't interrupt the model.
@@ -72,10 +76,16 @@ const VoiceInterface: React.FC = () => {
                 hasWarnedRef.current = true;
                 
                 sessionRef.current.then((s: any) => {
-                    s.send({ 
-                        parts: [{ text: "The user has been quiet for a while. Gently ask: 'Are you still with me?' or 'Is there anything else I can help with?' DO NOT hang up." }], 
-                        turnComplete: true 
-                    });
+                    if (isConnectedRef.current) {
+                        try {
+                            s.send({ 
+                                parts: [{ text: "The user has been quiet for a while. Gently ask: 'Are you still with me?' or 'Is there anything else I can help with?' DO NOT hang up." }], 
+                                turnComplete: true 
+                            });
+                        } catch (e) {
+                            console.warn("Failed to send inactivity check", e);
+                        }
+                    }
                 });
             }
 
@@ -93,6 +103,8 @@ const VoiceInterface: React.FC = () => {
 
   // Tool Handler
   const handleToolCall = async (fc: any) => {
+    if (!isConnectedRef.current) return;
+    
     console.log("Executing Tool:", fc.name, fc.args);
     setStatus(`Executing ${fc.name}...`);
     
@@ -163,21 +175,29 @@ const VoiceInterface: React.FC = () => {
     }
 
     // Send response back to Live API
-    if (sessionRef.current) {
+    if (sessionRef.current && isConnectedRef.current) {
        const session = await sessionRef.current;
-       session.sendToolResponse({
-          functionResponses: {
-            id : fc.id,
-            name: fc.name,
-            response: { result },
-          }
-       });
+       try {
+           session.sendToolResponse({
+              functionResponses: {
+                id : fc.id,
+                name: fc.name,
+                response: { result },
+              }
+           });
+       } catch (e) {
+           console.warn("Failed to send tool response (session likely closed):", e);
+       }
     }
-    setStatus('Listening...');
+    if (isConnectedRef.current) setStatus('Listening...');
   };
 
   const connect = async () => {
     if (!aiRef.current) return;
+    
+    // Ensure disconnect is complete before reconnecting
+    disconnect();
+    isConnectedRef.current = true;
     
     setStatus('Initializing Audio...');
     transcriptRef.current = "";
@@ -242,9 +262,10 @@ const VoiceInterface: React.FC = () => {
         model: 'gemini-2.5-flash-native-audio-preview-09-2025',
         callbacks: {
           onopen: async () => {
+            if (!isConnectedRef.current) return;
+            
             setStatus('Listening...');
             setConnected(true);
-            isConnectedRef.current = true;
             lastUserInteractionRef.current = Date.now();
             
             // Play Start-up Sound
@@ -271,6 +292,7 @@ const VoiceInterface: React.FC = () => {
             
             // Wait a brief moment for connection to stabilize before sending text
             setTimeout(() => {
+                if (!isConnectedRef.current) return;
                 try {
                     // Customized Greeting Prompt
                     session.send({ 
@@ -280,7 +302,7 @@ const VoiceInterface: React.FC = () => {
                         turnComplete: true 
                     });
                 } catch(e) {
-                    console.warn("Could not trigger initial greeting", e);
+                    // Suppress error if session closed
                 }
             }, 500);
             
@@ -293,34 +315,38 @@ const VoiceInterface: React.FC = () => {
             processorRef.current = scriptProcessor;
             
             scriptProcessor.onaudioprocess = (e) => {
-            if (isMuted || !isConnectedRef.current) return; 
+              // Critical: Check guard before sending
+              if (isMuted || !isConnectedRef.current) return; 
               
               const inputData = e.inputBuffer.getChannelData(0);
               
               // --- Voice Activity Detection (VAD) ---
-              // Calculate RMS (Root Mean Square) volume
               let sum = 0;
               for (let i = 0; i < inputData.length; i++) {
                   sum += inputData[i] * inputData[i];
               }
               const rms = Math.sqrt(sum / inputData.length);
               
-              // Threshold for "User is Speaking" (Adjust as needed for noise)
               if (rms > 0.01) { 
                   lastUserInteractionRef.current = Date.now();
-                  // Reset warnings if user speaks
                   hasWarnedRef.current = false;
               }
               // ---------------------------------------
 
-              const pcmBlob = createPcmBlob(inputData);
-              session.sendRealtimeInput({ media: pcmBlob });
+              try {
+                  const pcmBlob = createPcmBlob(inputData);
+                  session.sendRealtimeInput({ media: pcmBlob });
+              } catch (err) {
+                  // Ignore errors when sending to closed socket during teardown
+              }
             };
             
             source.connect(scriptProcessor);
             scriptProcessor.connect(inputContextRef.current.destination);
           },
           onmessage: async (msg: LiveServerMessage) => {
+            if (!isConnectedRef.current) return;
+
             // --- Transcript Accumulation for Summary ---
             const inputTx = msg.serverContent?.inputTranscription?.text;
             const outputTx = msg.serverContent?.outputTranscription?.text;
@@ -375,18 +401,32 @@ const VoiceInterface: React.FC = () => {
                 }
             }
           },
-          onclose: () => {
-            isConnectedRef.current = false;
-            setStatus('Disconnected');
-            setConnected(false);
-            finalizeRecording();
+          onclose: (e) => {
+            console.log("Session Closed", e);
+            if (isConnectedRef.current) {
+                // If we didn't initiate the disconnect, it's an error/drop
+                setStatus('Connection Closed');
+                setConnected(false);
+                finalizeRecording();
+                isConnectedRef.current = false;
+            }
           },
-          onerror: (e) => {
-            console.error(e);
-            isConnectedRef.current = false;
-            setStatus('Error occurred');
-            setConnected(false);
-            finalizeRecording();
+          onerror: (e: any) => {
+            console.error("Session Error", e);
+            if (isConnectedRef.current) {
+                // Try to extract a useful message if possible
+                let errorMessage = 'Connection Error';
+                if (e.message?.includes('401') || e.message?.includes('403')) {
+                    errorMessage = 'Invalid API Key';
+                } else if (e.message?.includes('503')) {
+                     errorMessage = 'Service Overloaded';
+                }
+                
+                setStatus(errorMessage);
+                setConnected(false);
+                finalizeRecording();
+                isConnectedRef.current = false;
+            }
           }
         },
         config: {
@@ -410,6 +450,7 @@ const VoiceInterface: React.FC = () => {
     } catch (err) {
       console.error("Connection failed", err);
       setStatus('Failed to access microphone or API');
+      isConnectedRef.current = false;
     }
   };
 
@@ -437,23 +478,30 @@ const VoiceInterface: React.FC = () => {
   };
 
   const disconnect = () => {
-    isConnectedRef.current = false;
+    isConnectedRef.current = false; // Stop processing immediately
+
     if (processorRef.current) {
-        processorRef.current.disconnect();
-        processorRef.current.onaudioprocess = null;
+        try {
+            processorRef.current.disconnect();
+            processorRef.current.onaudioprocess = null;
+        } catch (e) { /* ignore */ }
     }
     if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
     }
     if (sessionRef.current) {
-        sessionRef.current.then((s: any) => s.close());
+        // We do not await here to avoid blocking UI, just trigger close
+        sessionRef.current.then((s: any) => {
+            try { s.close(); } catch(e) {}
+        }).catch(() => {});
     }
     if (audioContextRef.current) {
-        audioContextRef.current.close();
+        try { audioContextRef.current.close(); } catch(e) {}
     }
     if (inputContextRef.current) {
-        inputContextRef.current.close();
+        try { inputContextRef.current.close(); } catch(e) {}
     }
+    setConnected(false);
   };
 
   return (

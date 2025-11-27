@@ -1,16 +1,43 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import VoiceInterface from './components/VoiceInterface';
 import ChatInterface from './components/ChatInterface';
 import Dashboard from './components/Dashboard';
 import SettingsModal from './components/SettingsModal';
 import RecordingsMenu from './components/RecordingsMenu';
-import { AssistantMode } from './types';
+import LoginPage from './components/LoginPage';
+import { AssistantMode, User } from './types';
+import { authService } from './services/authService';
 
 const App: React.FC = () => {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
   const [mode, setMode] = useState<AssistantMode>(AssistantMode.VOICE);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isRecordingsOpen, setIsRecordingsOpen] = useState(false);
+
+  useEffect(() => {
+    // Check for existing session on load
+    const currentUser = authService.getCurrentUser();
+    if (currentUser) {
+        setUser(currentUser);
+    }
+    setIsLoading(false);
+  }, []);
+
+  const handleLogout = () => {
+      authService.logout();
+      setUser(null);
+  };
+
+  if (isLoading) {
+      return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Loading...</div>;
+  }
+
+  if (!user) {
+      return <LoginPage onLoginSuccess={() => setUser(authService.getCurrentUser())} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 overflow-hidden flex flex-col">
@@ -59,14 +86,21 @@ const App: React.FC = () => {
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             </button>
-            <div className="text-xs text-right hidden lg:block">
-                <p className="text-white font-medium">Executive Account</p>
-                <p className="text-slate-500">admin@mrsmart.ai</p>
-            </div>
-            <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 overflow-hidden">
-                <div className="w-full h-full bg-gradient-to-tr from-slate-700 to-slate-600 flex items-center justify-center text-xs font-bold text-slate-300">
-                    MS
+            <div className="text-xs text-right hidden lg:block group relative cursor-pointer" onClick={handleLogout}>
+                <p className="text-white font-medium">{user.name}</p>
+                <p className="text-slate-500">{user.email}</p>
+                <div className="absolute top-full right-0 mt-2 w-32 bg-slate-900 border border-slate-700 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto p-1">
+                     <div className="text-red-400 text-center py-1 text-xs font-semibold hover:bg-slate-800 rounded">Log Out</div>
                 </div>
+            </div>
+            <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 overflow-hidden cursor-pointer" onClick={handleLogout} title="Log Out">
+                {user.avatar ? (
+                    <img src={user.avatar} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                    <div className="w-full h-full bg-gradient-to-tr from-slate-700 to-slate-600 flex items-center justify-center text-xs font-bold text-slate-300">
+                        {user.name.charAt(0)}
+                    </div>
+                )}
             </div>
         </div>
       </header>
